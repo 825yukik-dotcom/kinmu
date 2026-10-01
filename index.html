@@ -67,6 +67,15 @@
       <div class="btns"><button id="addParking">追加</button></div>
     </div>
     <div class="card">
+      <h2>よく使う電車の区間</h2>
+      <ul class="plist" id="trainList"></ul>
+      <div class="grid2">
+        <label>区間<input type="text" id="newTrainRoute" placeholder="例: A駅-B駅 往復"></label>
+        <label>運賃(円)<input type="number" id="newTrainFee" inputmode="numeric" min="0"></label>
+      </div>
+      <div class="btns"><button id="addTrain">追加</button></div>
+    </div>
+    <div class="card">
       <h2>ガソリン代</h2>
       <label>清算方法
         <select id="setGasMode">
@@ -109,6 +118,13 @@
     <div class="chips mins" id="endMins"></div>
     <p class="worked" id="fWorked"></p>
 
+    <label>交通手段</label>
+    <div class="seg" id="modeSeg">
+      <button type="button" data-mode="car">🚗 車</button>
+      <button type="button" data-mode="train">🚃 電車</button>
+    </div>
+
+    <div id="carFields">
     <fieldset>
       <legend>駐車場</legend>
       <div class="chips" id="parkChips"></div>
@@ -127,11 +143,27 @@
       <legend>ガソリン代（給油）</legend>
       <label>給油額(円)<input type="number" id="fGas" inputmode="numeric" min="0"></label>
     </fieldset>
+    </div>
+
+    <div id="trainFields" hidden>
+    <fieldset>
+      <legend>電車</legend>
+      <div class="chips" id="trainChips"></div>
+      <div class="grid2">
+        <label>区間<input type="text" id="fTrainRoute" placeholder="例: A駅-B駅 往復"></label>
+        <label>運賃(円)<input type="number" id="fTrainFee" inputmode="numeric" min="0"></label>
+      </div>
+    </fieldset>
+    </div>
 
     <fieldset>
       <legend>領収書</legend>
       <div class="thumbs" id="fReceipts"></div>
-      <button type="button" id="addReceipt">＋ 写真を追加</button>
+      <div class="btns tight">
+        <button type="button" class="primary" id="takePhoto">📷 撮影</button>
+        <button type="button" id="pickPhoto">アルバムから</button>
+      </div>
+      <input type="file" id="cameraFile" accept="image/*" capture="environment" hidden>
       <input type="file" id="receiptFile" accept="image/*" multiple hidden>
     </fieldset>
 

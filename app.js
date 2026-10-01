@@ -54,6 +54,8 @@ const DEFAULT_SETTINGS = {
   end: '17:30',
   breakMin: 60,
   parkings: [],
+  trainRoutes: [],
+  lastMode: 'car',   // 新しい日の交通手段（前回保存したもの）
   gasMode: 'none',   // none | distance | actual
   gasRate: 0,
   endFrom: '15:00',  // 退勤ボタンの範囲
@@ -95,7 +97,9 @@ const dayLabel = date => {
   const d = new Date(date + 'T00:00:00');
   return `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]})`;
 };
+const isTrain = r => r.mode === 'train';
 const gasFee = r => {
+  if (isTrain(r)) return 0;
   if (settings.gasMode === 'distance') return num(r.km) * num(settings.gasRate);
   if (settings.gasMode === 'actual') return num(r.gas);
   return 0;
@@ -167,15 +171,17 @@ function totals() {
     min: recs.reduce((s, r) => s + workedMin(r), 0),
     park: recs.reduce((s, r) => s + num(r.parkFee), 0),
     gas: recs.reduce((s, r) => s + gasFee(r), 0),
+    train: recs.reduce((s, r) => s + (isTrain(r) ? num(r.trainFee) : 0), 0),
   };
 }
+const transportTotal = t => t.park + t.gas + t.train;
 
 function renderList() {
   const t = totals();
   $('listSummary').innerHTML = `
     <div><b>${t.days}日</b><span>勤務日数</span></div>
     <div><b>${fmtHours(t.min)}</b><span>合計時間</span></div>
-    <div><b>${yen(t.park + t.gas)}円</b><span>交通費</span></div>`;
+    <div><b>${yen(transportTotal(t))}円</b><span>交通費</span></div>`;
 
   const receiptCountByDay = {};
   monthReceipts.forEach(r => { receiptCountByDay[r.date] = (receiptCountByDay[r.date] || 0) + 1; });
@@ -197,7 +203,8 @@ function renderList() {
     let h = '';
     if (r) {
       const subs = [];
-      if (num(r.parkFee) || r.parkName) subs.push(`P ${r.parkName ? r.parkName + ' ' : ''}${yen(num(r.parkFee))}円`);
+      if (isTrain(r)) subs.push(`🚃 ${r.trainRoute ? r.trainRoute + ' ' : ''}${yen(num(r.trainFee))}円`);
+      else if (num(r.parkFee) || r.parkName) subs.push(`P ${r.parkName ? r.parkName + ' ' : ''}${yen(num(r.parkFee))}円`);
       const g = gasFee(r);
       if (g) subs.push(`ガソリン ${yen(g)}円`);
       if (receiptCountByDay[date]) subs.push(`📎${receiptCountByDay[date]}`);
@@ -228,18 +235,24 @@ function buildReport() {
   const lines = [`【${curM}月 勤務報告】`];
   for (const r of recs) {
     let line = `${dayLabel(r.date)} ${shortTime(r.start)}-${shortTime(r.end)} 休${num(r.breakMin)}分 ${fmtHours(workedMin(r))}`;
-    if (num(r.parkFee)) line += ` 駐車場${r.parkName ? '(' + r.parkName + ')' : ''} ${yen(num(r.parkFee))}円`;
-    if (settings.gasMode === 'distance' && num(r.km)) line += ` ガソリン ${num(r.km)}km ${yen(gasFee(r))}円`;
-    if (settings.gasMode === 'actual' && num(r.gas)) line += ` ガソリン ${yen(num(r.gas))}円`;
+    if (isTrain(r)) {
+      if (num(r.trainFee) || r.trainRoute) line += ` 電車${r.trainRoute ? '(' + r.trainRoute + ')' : ''} ${yen(num(r.trainFee))}円`;
+    } else {
+      if (num(r.parkFee)) line += ` 駐車場${r.parkName ? '(' + r.parkName + ')' : ''} ${yen(num(r.parkFee))}円`;
+      if (settings.gasMode === 'distance' && num(r.km)) line += ` ガソリン ${num(r.km)}km ${yen(gasFee(r))}円`;
+      if (settings.gasMode === 'actual' && num(r.gas)) line += ` ガソリン ${yen(num(r.gas))}円`;
+    }
     lines.push(line);
   }
   const t = totals();
+  const hasTrain = recs.some(isTrain);
   lines.push('――――');
   lines.push(`勤務日数: ${t.days}日`);
   lines.push(`合計時間: ${fmtHours(t.min)}`);
   lines.push(`駐車場代: ${yen(t.park)}円`);
   if (settings.gasMode !== 'none') lines.push(`ガソリン代: ${yen(t.gas)}円`);
-  lines.push(`交通費合計: ${yen(t.park + t.gas)}円`);
+  if (hasTrain) lines.push(`電車代: ${yen(t.train)}円`);
+  lines.push(`交通費合計: ${yen(transportTotal(t))}円`);
   return lines.join('\n');
 }
 
@@ -265,14 +278,19 @@ function renderSettings() {
   $('setGasMode').value = settings.gasMode;
   $('setGasRate').value = settings.gasRate || '';
   $('gasRateWrap').hidden = settings.gasMode !== 'distance';
-  const ul = $('parkingList');
+  renderRegistry($('parkingList'), settings.parkings);
+  renderRegistry($('trainList'), settings.trainRoutes);
+}
+
+// 登録済みの駐車場・電車区間の一覧（{name, fee} の配列）
+function renderRegistry(ul, list) {
   ul.innerHTML = '';
-  if (!settings.parkings.length) ul.innerHTML = '<li class="muted small">まだ登録がありません</li>';
-  settings.parkings.forEach((p, i) => {
+  if (!list.length) ul.innerHTML = '<li class="muted small">まだ登録がありません</li>';
+  list.forEach((p, i) => {
     const li = document.createElement('li');
     li.innerHTML = `<span>${escapeHTML(p.name)}　${yen(p.fee)}円</span><button class="danger">削除</button>`;
     li.querySelector('button').addEventListener('click', async () => {
-      settings.parkings.splice(i, 1);
+      list.splice(i, 1);
       await saveSettings();
       renderSettings();
     });
@@ -294,10 +312,13 @@ async function openEditor(date) {
   $('fParkFee').value = r && num(r.parkFee) ? r.parkFee : '';
   $('fKm').value = r && r.km ? r.km : '';
   $('fGas').value = r && r.gas ? r.gas : '';
+  $('fTrainRoute').value = r ? (r.trainRoute || '') : '';
+  $('fTrainFee').value = r && num(r.trainFee) ? r.trainFee : '';
   $('fNote').value = r ? (r.note || '') : '';
   $('gasDistance').hidden = settings.gasMode !== 'distance';
   $('gasActual').hidden = settings.gasMode !== 'actual';
   $('deleteRec').hidden = !r;
+  setMode(r ? (r.mode || 'car') : settings.lastMode);
   renderChips();
   renderEditorReceipts();
   updateWorked();
@@ -354,29 +375,34 @@ function updateWorked() {
   }
 }
 
+function setMode(mode) {
+  editing.mode = mode;
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  $('carFields').hidden = mode !== 'car';
+  $('trainFields').hidden = mode !== 'train';
+}
+
 function renderChips() {
-  const box = $('parkChips');
+  renderPickChips($('parkChips'), settings.parkings, $('fParkName'), $('fParkFee'));
+  renderPickChips($('trainChips'), settings.trainRoutes, $('fTrainRoute'), $('fTrainFee'));
+}
+
+// 登録済みの項目をボタンで並べ、押すと名前と金額を入れる
+function renderPickChips(box, list, nameInput, feeInput) {
   box.innerHTML = '';
-  const curName = $('fParkName').value;
-  settings.parkings.forEach(p => {
+  const add = (label, on, onClick) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = `${p.name} ${yen(p.fee)}円`;
-    if (p.name === curName) b.classList.add('on');
-    b.addEventListener('click', () => {
-      $('fParkName').value = p.name;
-      $('fParkFee').value = p.fee;
-      renderChips();
-    });
+    b.textContent = label;
+    if (on) b.classList.add('on');
+    b.addEventListener('click', () => { onClick(); renderChips(); });
     box.appendChild(b);
-  });
-  if (settings.parkings.length) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = 'なし';
-    b.addEventListener('click', () => { $('fParkName').value = ''; $('fParkFee').value = ''; renderChips(); });
-    box.appendChild(b);
-  }
+  };
+  list.forEach(p => add(`${p.name} ${yen(p.fee)}円`, p.name === nameInput.value, () => {
+    nameInput.value = p.name;
+    feeInput.value = p.fee;
+  }));
+  if (list.length) add('なし', false, () => { nameInput.value = ''; feeInput.value = ''; });
 }
 
 function renderEditorReceipts() {
@@ -397,18 +423,26 @@ function renderEditorReceipts() {
 }
 
 async function saveEditor() {
+  const car = editing.mode === 'car';
   const rec = {
     date: editing.date,
     start: $('fStart').value,
     end: $('fEnd').value,
     breakMin: num($('fBreak').value),
-    parkName: $('fParkName').value.trim(),
-    parkFee: num($('fParkFee').value),
-    km: num($('fKm').value),
-    gas: num($('fGas').value),
+    mode: editing.mode,
+    parkName: car ? $('fParkName').value.trim() : '',
+    parkFee: car ? num($('fParkFee').value) : 0,
+    km: car ? num($('fKm').value) : 0,
+    gas: car ? num($('fGas').value) : 0,
+    trainRoute: car ? '' : $('fTrainRoute').value.trim(),
+    trainFee: car ? 0 : num($('fTrainFee').value),
     note: $('fNote').value.trim(),
   };
   if (!rec.start || !rec.end) { toast('出勤と退勤を入力してください'); return; }
+  if (settings.lastMode !== rec.mode) {
+    settings.lastMode = rec.mode;
+    await saveSettings();
+  }
   const { receipts, deleted } = editing;
   await runTx(['records', 'receipts'], t => {
     t.objectStore('records').put(rec);
@@ -552,12 +586,15 @@ function bind() {
 
   ['fStart', 'fEnd', 'fBreak', 'fKm'].forEach(id => $(id).addEventListener('input', updateWorked));
   $('fParkName').addEventListener('input', renderChips);
+  $('fTrainRoute').addEventListener('input', renderChips);
+  document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
   $('editForm').addEventListener('submit', e => { e.preventDefault(); saveEditor(); });
   $('cancelEdit').addEventListener('click', () => { $('editor').close(); editing = null; });
   $('deleteRec').addEventListener('click', deleteRecord);
 
-  $('addReceipt').addEventListener('click', () => $('receiptFile').click());
-  $('receiptFile').addEventListener('change', async e => {
+  $('takePhoto').addEventListener('click', () => $('cameraFile').click());
+  $('pickPhoto').addEventListener('click', () => $('receiptFile').click());
+  const onPhotos = async e => {
     const files = [...e.target.files];
     e.target.value = '';
     for (const f of files) {
@@ -567,7 +604,9 @@ function bind() {
       } catch (err) { toast(err.message); }
     }
     renderEditorReceipts();
-  });
+  };
+  $('cameraFile').addEventListener('change', onPhotos);
+  $('receiptFile').addEventListener('change', onPhotos);
 
   $('copyReport').addEventListener('click', async () => { await copyText(buildReport()); toast('コピーしました。LINEに貼り付けてください'); });
   $('shareReport').addEventListener('click', shareReport);
@@ -592,6 +631,17 @@ function bind() {
     settings.parkings.push({ name, fee: num($('newParkFee').value) });
     $('newParkName').value = '';
     $('newParkFee').value = '';
+    await saveSettings();
+    renderSettings();
+    toast('追加しました');
+  });
+
+  $('addTrain').addEventListener('click', async () => {
+    const name = $('newTrainRoute').value.trim();
+    if (!name) { toast('区間を入力してください'); return; }
+    settings.trainRoutes.push({ name, fee: num($('newTrainFee').value) });
+    $('newTrainRoute').value = '';
+    $('newTrainFee').value = '';
     await saveSettings();
     renderSettings();
     toast('追加しました');
