@@ -29,26 +29,29 @@
   <!-- 報告 -->
   <section id="tab-report" class="tab">
     <div class="card">
-      <h2>報告文</h2>
-      <textarea id="reportText" rows="14" readonly></textarea>
-      <div class="btns">
-        <button class="primary" id="copyReport">コピー</button>
-        <button id="shareReport">LINEなどで共有</button>
-      </div>
-    </div>
-    <div class="card">
-      <h2>領収書</h2>
-      <p class="muted" id="receiptCount"></p>
+      <h2 id="sendTitle"></h2>
+      <table class="sum" id="sendSummary"></table>
+      <p class="muted small" id="receiptCount"></p>
       <div class="thumbs" id="monthReceipts"></div>
       <div class="btns">
-        <button class="primary" id="shareReceipts">領収書をまとめて共有</button>
+        <button class="primary wide" id="sendSheet">スプシに送信</button>
       </div>
-      <p class="muted small">共有画面でLINEを選ぶと、画像をまとめて送れます。</p>
+      <p class="small" id="sendStatus"></p>
+      <p class="muted small">何回送っても、この月のあなたの行が新しい内容に置き換わるだけです。直したときは、もう一度送ってください。</p>
     </div>
   </section>
 
   <!-- 設定 -->
   <section id="tab-settings" class="tab">
+    <div class="card">
+      <h2>スプシ送信の設定</h2>
+      <label>氏名（担当者）<input type="text" id="setName" placeholder="例: 山田 花子"></label>
+      <label>勤務先<input type="text" id="setSite" placeholder="例: 山科"></label>
+      <label>送信先URL<input type="url" id="setUrl" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></label>
+      <label>合言葉<input type="text" id="setToken" autocomplete="off"></label>
+      <div class="btns"><button id="testSend">接続テスト</button></div>
+      <p class="muted small">送信先URLと合言葉は、管理者さんから教えてもらってください。</p>
+    </div>
     <div class="card">
       <h2>いつもの勤務時間</h2>
       <div class="grid3">
@@ -100,7 +103,7 @@
 
 <nav class="tabs">
   <button data-tab="list" class="active">記録</button>
-  <button data-tab="report">報告</button>
+  <button data-tab="report">送信</button>
   <button data-tab="settings">設定</button>
 </nav>
 

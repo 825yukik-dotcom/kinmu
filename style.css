@@ -119,6 +119,14 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
 .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .btns.end { align-items: center; }
 .btns.tight { margin-top: 4px; }
+button.wide { flex: 1; min-height: 52px; font-size: 17px; }
+button:disabled { opacity: .5; cursor: default; }
+table.sum { width: 100%; border-collapse: collapse; font-size: 15px; }
+table.sum th { text-align: left; font-weight: normal; color: var(--muted); padding: 4px 0; }
+table.sum td { text-align: right; font-weight: 600; padding: 4px 0; }
+table.sum tr.total th, table.sum tr.total td { border-top: 1px solid var(--line); padding-top: 8px; }
+#sendStatus { margin: 8px 0 0; font-weight: 600; }
+#sendStatus.err { color: var(--danger); }
 .spacer { flex: 1; }
 
 .seg { display: grid; grid-template-columns: 1fr 1fr; margin-top: 4px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }

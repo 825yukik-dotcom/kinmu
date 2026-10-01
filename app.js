@@ -58,6 +58,11 @@ const DEFAULT_SETTINGS = {
   lastMode: 'car',   // 新しい日の交通手段（前回保存したもの）
   gasMode: 'none',   // none | distance | actual
   gasRate: 0,
+  name: '',
+  site: '',          // 勤務先（スプシのタブ名・見出しになる）
+  sheetUrl: '',      // Apps Script の Web アプリ URL
+  sheetToken: '',
+  sent: {},          // 'YYYY-MM' -> 最後に送信した日時
   endFrom: '15:00',  // 退勤ボタンの範囲
   endTo: '17:30',
 };
@@ -230,35 +235,25 @@ function escapeHTML(s) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function buildReport() {
-  const recs = Object.values(monthRecs).sort((a, b) => a.date.localeCompare(b.date));
-  const lines = [`【${curM}月 勤務報告】`];
-  for (const r of recs) {
-    let line = `${dayLabel(r.date)} ${shortTime(r.start)}-${shortTime(r.end)} 休${num(r.breakMin)}分 ${fmtHours(workedMin(r))}`;
-    if (isTrain(r)) {
-      if (num(r.trainFee) || r.trainRoute) line += ` 電車${r.trainRoute ? '(' + r.trainRoute + ')' : ''} ${yen(num(r.trainFee))}円`;
-    } else {
-      if (num(r.parkFee)) line += ` 駐車場${r.parkName ? '(' + r.parkName + ')' : ''} ${yen(num(r.parkFee))}円`;
-      if (settings.gasMode === 'distance' && num(r.km)) line += ` ガソリン ${num(r.km)}km ${yen(gasFee(r))}円`;
-      if (settings.gasMode === 'actual' && num(r.gas)) line += ` ガソリン ${yen(num(r.gas))}円`;
-    }
-    lines.push(line);
-  }
-  const t = totals();
-  const hasTrain = recs.some(isTrain);
-  lines.push('――――');
-  lines.push(`勤務日数: ${t.days}日`);
-  lines.push(`合計時間: ${fmtHours(t.min)}`);
-  lines.push(`駐車場代: ${yen(t.park)}円`);
-  if (settings.gasMode !== 'none') lines.push(`ガソリン代: ${yen(t.gas)}円`);
-  if (hasTrain) lines.push(`電車代: ${yen(t.train)}円`);
-  lines.push(`交通費合計: ${yen(transportTotal(t))}円`);
-  return lines.join('\n');
-}
+const ymKey = () => `${curY}-${pad(curM)}`;
 
 function renderReport() {
-  $('reportText').value = buildReport();
-  $('receiptCount').textContent = `${curM}月の領収書: ${monthReceipts.length}枚`;
+  const t = totals();
+  const rows = [
+    ['勤務日数', `${t.days}日`],
+    ['合計時間', fmtHours(t.min)],
+    ['駐車場代', `${yen(t.park)}円`],
+  ];
+  if (settings.gasMode !== 'none') rows.push(['ガソリン代', `${yen(t.gas)}円`]);
+  if (t.train || Object.values(monthRecs).some(isTrain)) rows.push(['電車代', `${yen(t.train)}円`]);
+  $('sendTitle').textContent = `${curM}月の送信`;
+  $('sendSummary').innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
+    + `<tr class="total"><th>交通費合計</th><td>${yen(transportTotal(t))}円</td></tr>`;
+  const sent = settings.sent[ymKey()];
+  const st = $('sendStatus');
+  st.className = '';
+  st.textContent = sent ? `前回の送信: ${new Date(sent).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'この月はまだ送信していません';
+  $('receiptCount').textContent = `領収書: ${monthReceipts.length}枚`;
   const box = $('monthReceipts');
   box.innerHTML = '';
   for (const rc of monthReceipts) {
@@ -272,6 +267,10 @@ function renderReport() {
 }
 
 function renderSettings() {
+  $('setName').value = settings.name;
+  $('setSite').value = settings.site;
+  $('setUrl').value = settings.sheetUrl;
+  $('setToken').value = settings.sheetToken;
   $('setStart').value = settings.start;
   $('setEnd').value = settings.end;
   $('setBreak').value = settings.breakMin;
@@ -477,45 +476,94 @@ function showImage(blob) {
   $('viewer').showModal();
 }
 
-/* ===== 共有・コピー ===== */
-async function copyText(text) {
+/* ===== スプシ送信 (Google Apps Script) ===== */
+async function callSheet(body) {
+  if (!settings.sheetUrl) throw new Error('設定タブで送信先URLを入力してください');
+  let res;
   try {
-    await navigator.clipboard.writeText(text);
+    // text/plain にすると事前確認(CORS)なしで送れる
+    res = await fetch(settings.sheetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ token: settings.sheetToken, ...body }),
+    });
   } catch {
-    const ta = $('reportText');
-    ta.removeAttribute('readonly');
-    ta.select();
-    document.execCommand('copy');
-    ta.setAttribute('readonly', '');
+    throw new Error('送信できませんでした。電波の良いところで、もう一度試してください');
+  }
+  let data;
+  try { data = await res.json(); } catch { throw new Error('送信先URLが正しくないようです'); }
+  if (!data.ok) throw new Error(data.error || '送信に失敗しました');
+  return data;
+}
+
+function sheetRow(r, receiptUrls) {
+  const train = isTrain(r);
+  const park = train ? 0 : num(r.parkFee);
+  const trainFee = train ? num(r.trainFee) : 0;
+  const gas = gasFee(r);
+  return {
+    date: r.date,
+    start: r.start,
+    end: r.end,
+    breakMin: num(r.breakMin),
+    workedMin: workedMin(r),
+    mode: train ? '電車' : '車',
+    place: train ? (r.trainRoute || '') : (r.parkName || ''),
+    park, train: trainFee, gas: Math.round(gas),
+    total: Math.round(park + trainFee + gas),
+    receipts: receiptUrls,
+    note: r.note || '',
+  };
+}
+
+async function sendToSheet() {
+  const st = $('sendStatus');
+  const btn = $('sendSheet');
+  const show = (msg, err) => { st.textContent = msg; st.className = err ? 'err' : ''; };
+  if (!settings.name) { show('設定タブで氏名を入力してください', true); return; }
+  const recs = Object.values(monthRecs).sort((a, b) => a.date.localeCompare(b.date));
+  if (!recs.length) { show(`${curM}月の記録がありません`, true); return; }
+
+  btn.disabled = true;
+  try {
+    // 1. まだ送っていない領収書を1枚ずつ送る（送ったものはURLを覚えておく）
+    const pending = monthReceipts.filter(rc => !rc.driveUrl);
+    for (let i = 0; i < pending.length; i++) {
+      show(`領収書を送信中… ${i + 1}/${pending.length}`);
+      const rc = pending[i];
+      const data = (await blobToDataURL(rc.blob)).split(',')[1];
+      const res = await callSheet({ action: 'receipt', name: settings.name, ym: ymKey(), date: rc.date, id: rc.id, data });
+      rc.driveUrl = res.url;
+      await runTx(['receipts'], t => t.objectStore('receipts').put(rc));
+    }
+
+    // 2. 明細を送る（この月の自分の行を置き換え）
+    show('明細を送信中…');
+    const urlsByDate = {};
+    monthReceipts.forEach(rc => (urlsByDate[rc.date] = urlsByDate[rc.date] || []).push(rc.driveUrl));
+    await callSheet({
+      action: 'month', name: settings.name, site: settings.site, ym: ymKey(),
+      rows: recs.map(r => sheetRow(r, urlsByDate[r.date] || [])),
+    });
+    settings.sent[ymKey()] = new Date().toISOString();
+    await saveSettings();
+    renderReport();
+    show(`送信しました（${recs.length}日分）`);
+    toast('スプシに送信しました');
+  } catch (e) {
+    show(e.message, true);
+  } finally {
+    btn.disabled = false;
   }
 }
 
-async function shareReport() {
-  const text = buildReport();
-  if (navigator.share) {
-    try { await navigator.share({ text }); return; }
-    catch (e) { if (e.name === 'AbortError') return; }
+async function testSheet() {
+  try {
+    await callSheet({ action: 'ping' });
+    toast('接続できました');
+  } catch (e) {
+    toast(e.message);
   }
-  // 共有機能がないブラウザはLINEの送信画面を直接開く
-  location.href = 'https://line.me/R/share?text=' + encodeURIComponent(text);
-}
-
-async function shareReceipts() {
-  if (!monthReceipts.length) { toast(`${curM}月の領収書はありません`); return; }
-  const count = {};
-  const files = monthReceipts.map(rc => {
-    const key = rc.date.slice(5).replace('-', '');
-    count[key] = (count[key] || 0) + 1;
-    return new File([rc.blob], `receipt_${key}_${count[key]}.jpg`, { type: 'image/jpeg' });
-  });
-  if (navigator.canShare && navigator.canShare({ files })) {
-    try { await navigator.share({ files }); }
-    catch (e) { if (e.name !== 'AbortError') toast('共有できませんでした'); }
-    return;
-  }
-  // 共有できない場合は1枚ずつ保存
-  files.forEach(f => downloadBlob(f, f.name));
-  toast('このブラウザでは共有できないため、画像を保存しました');
 }
 
 function downloadBlob(blob, name) {
@@ -608,9 +656,16 @@ function bind() {
   $('cameraFile').addEventListener('change', onPhotos);
   $('receiptFile').addEventListener('change', onPhotos);
 
-  $('copyReport').addEventListener('click', async () => { await copyText(buildReport()); toast('コピーしました。LINEに貼り付けてください'); });
-  $('shareReport').addEventListener('click', shareReport);
-  $('shareReceipts').addEventListener('click', shareReceipts);
+  $('sendSheet').addEventListener('click', sendToSheet);
+  $('testSend').addEventListener('click', testSheet);
+  const saveSheetSettings = async () => {
+    settings.name = $('setName').value.trim();
+    settings.site = $('setSite').value.trim();
+    settings.sheetUrl = $('setUrl').value.trim();
+    settings.sheetToken = $('setToken').value.trim();
+    await saveSettings();
+  };
+  ['setName', 'setSite', 'setUrl', 'setToken'].forEach(id => $(id).addEventListener('change', saveSheetSettings));
 
   const saveDefaults = async () => {
     settings.start = $('setStart').value || DEFAULT_SETTINGS.start;

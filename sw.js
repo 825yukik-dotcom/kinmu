@@ -1,5 +1,5 @@
-// ネット優先・オフライン時はキャッシュを使う
-const CACHE = 'kinmu-v4';
+﻿// ネット優先・オフライン時はキャッシュを使う
+const CACHE = 'kinmu-v6';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
